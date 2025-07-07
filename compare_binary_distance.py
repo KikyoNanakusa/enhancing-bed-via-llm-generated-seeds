@@ -1,26 +1,25 @@
 #!/usr/bin/env python3
 """
-バイナリ一致度（命令レベル一致率）を計算するスクリプト
+Script to calculate binary similarity (instruction-level matching rate)
 
-使用方法:
-    1. ターゲットバイナリと候補バイナリの双方に対して
-       $ objdump -d <バイナリ> > <出力ファイル>
-       を実行して逆アセンブル結果をファイルに保存する。
-    2. 本スクリプトに対して、ターゲットの objdump テキストと
-       候補の objdump テキストのファイルを引数として渡す。
+Usage:
+    1. For both target and candidate binaries, execute:
+       $ objdump -d <binary> > <output_file>
+       to save the disassembly results to files.
+    2. Pass the target and candidate objdump text files as arguments to this script:
        $ chmod +x bin_match.py
        $ ./bin_match.py target.dump candidate.dump
-    3. コマンド出力として、命令レベル一致率(%) が表示される。
+    3. The instruction-level matching rate (%) will be displayed as command output.
 
-    または、JSONファイルを処理する場合:
+    Or, for processing JSON files:
     $ python3 compare_binary_distance.py input.json output.json
 
-アルゴリズム概要:
-    1. objdump -d の出力を読み込み
-    2. パディング命令(NOP 等)を除去し、ジャンプ・コールのアドレスを正規化
-    3. アセンブリ命令部分のみを行単位で抽出してリスト化
-    4. SequenceMatcher を用いた編集距離 (d) の算出
-    5. 一致率 = (N - d) / N * 100 を計算して出力
+Algorithm overview:
+    1. Load objdump -d output
+    2. Remove padding instructions (NOPs, etc.) and normalize jump/call addresses
+    3. Extract only assembly instruction parts line by line into a list
+    4. Calculate edit distance (d) using SequenceMatcher
+    5. Calculate and output matching rate = (N - d) / N * 100
 """
 
 import re
@@ -35,8 +34,8 @@ from tqdm import tqdm
 
 def load_objdump(filepath: str) -> str:
     """
-    objdump -d の出力テキストを読み込む
-    （ファイルパスを指定、'-' を渡すと標準入力から読み込む）
+    Load objdump -d output text
+    (Specify file path, or pass '-' to read from standard input)
     """
     if filepath == '-':
         return sys.stdin.read()
@@ -46,12 +45,12 @@ def load_objdump(filepath: str) -> str:
 
 def normalize_disasm(text: str) -> str:
     """
-    逆アセンブルテキストを正規化する:
-      1. パディング命令(NOPなど)を除去
-      2. 分岐(call/jmp/je/jne など)命令のアドレスオペランドを "SEC+OFFSET" に置換
-      3. 不要な16進数バイト列を除去し、余分な空白を詰める
+    Normalize disassembly text:
+      1. Remove padding instructions (NOPs, etc.)
+      2. Replace address operands of branch instructions (call/jmp/je/jne, etc.) with "SEC+OFFSET"
+      3. Remove unnecessary hexadecimal byte sequences and trim extra whitespace
 
-    正規化手法の出典: Schulte et al. 2018 §III-B1
+    Normalization method source: Schulte et al. 2018 §III-B1
         "We remove irrelevant nop and other padding instructions meant to align code ...
          We identify instructions that change the program counter, such as jmp 0x8014040
          or call 0x8014080 and replace the address operand with the function name or ELF
@@ -59,69 +58,69 @@ def normalize_disasm(text: str) -> str:
     """
     lines = []
     for line in text.splitlines():
-        # 逆アセンブル行のフォーマット例:
+        # Disassembly line format example:
         #   401000:   55                      push   %rbp
         #   401001:   48 89 e5                mov    %rsp,%rbp
-        # 正規表現で「アドレス: バイト列 命令」という形式を抽出
+        # Extract "address: byte_sequence instruction" format using regex
         m = re.match(r'^\s*[0-9A-Fa-f]+:\s+([0-9A-Fa-f ]+)\s+(.+)$', line)
         if not m:
             continue
 
-        byte_seq = m.group(1).strip()   # 例: "55" や "48 89 e5"
-        asm_insn = m.group(2).strip()  # 例: "push   %rbp"
+        byte_seq = m.group(1).strip()   # Example: "55" or "48 89 e5"
+        asm_insn = m.group(2).strip()  # Example: "push   %rbp"
 
-        # 1) パディング命令 (nop, paused など) を除去
-        #    論文では「irrelevant nop and other padding instructions」を除去と明示
-        #    例: "nop" や "pause" を完全一致チェック
+        # 1) Remove padding instructions (nop, pause, etc.)
+        #    Paper explicitly mentions removing "irrelevant nop and other padding instructions"
+        #    Example: Check exact match for "nop" or "pause"
         if asm_insn.startswith('nop') or asm_insn.startswith('pause'):
-            continue  # 除外
+            continue  # Exclude
 
-        # 2) ジャンプ/コール命令のアドレスオペランドを置換
-        #    例: "jmp 0x400510" -> "jmp <TARGET>"
-        #    置換パターン: \b(call|jmp|je|jne|jg|jl|jle|jge)\s+0x[0-9A-Fa-f]+
+        # 2) Replace address operands of jump/call instructions
+        #    Example: "jmp 0x400510" -> "jmp <TARGET>"
+        #    Replacement pattern: \b(call|jmp|je|jne|jg|jl|jle|jge)\s+0x[0-9A-Fa-f]+
         asm_insn = re.sub(
             r'\b(call|jmp|je|jne|jz|jnz|jg|jge|jl|jle)\s+0x[0-9A-Fa-f]+',
             r'\1 <ADDR>',
             asm_insn
         )
 
-        # 3) 他の絶対アドレスや即値 (0x1234 や 1234) を <IMM> に一般化
-        #    これにより、アドレス以外のコンテキスト差異も排除
+        # 3) Generalize other absolute addresses or immediate values (0x1234 or 1234) to <IMM>
+        #    This also eliminates non-address context differences
         asm_insn = re.sub(r'0x[0-9A-Fa-f]+|\b\d+\b', '<IMM>', asm_insn)
 
-        # 4) 連続する空白を単一スペースにしてトリム
+        # 4) Collapse consecutive whitespace to single space and trim
         asm_insn = re.sub(r'\s+', ' ', asm_insn).strip()
 
         lines.append(asm_insn)
 
-    # 正規化済みアセンブリ命令を改行区切りで返却
-    #   例: ["push %rbp", "mov %rsp, %rbp", "call <ADDR>", ...]
+    # Return normalized assembly instructions separated by newlines
+    #   Example: ["push %rbp", "mov %rsp, %rbp", "call <ADDR>", ...]
     return '\n'.join(lines)
 
 
 def extract_instructions(norm_text: str) -> list[str]:
     """
-    正規化された逆アセンブルテキストから命令部分だけを行単位で抽出してリスト化する。
-    各行は既に「命令文字列のみ」の状態になっているので、行そのままをリスト要素とする。
+    Extract only instruction parts line by line from normalized disassembly text and convert to list.
+    Each line is already in the state of "instruction string only", so use lines as list elements as-is.
     """
-    # 空行は無視して返却
+    # Return ignoring empty lines
     return [line for line in norm_text.splitlines() if line.strip()]
 
 
 def compute_similarity(insnsA: list[str], insnsB: list[str]) -> float:
     """
-    命令シーケンス (insnsA, insnsB) に対し、SequenceMatcher を用いて
-    最長一致部分列に基づく一致率を計算し、0～100 のパーセンテージで返す。
+    Calculate match rate based on longest common subsequence for instruction sequences (insnsA, insnsB)
+    using SequenceMatcher and return as 0-100 percentage.
 
-    - Python 標準ライブラリ difflib.SequenceMatcher を使用
-    - ratio() * 100 で百分率に変換
+    - Uses Python standard library difflib.SequenceMatcher
+    - Converts ratio() * 100 to percentage
     """
     sm = SequenceMatcher(None, insnsA, insnsB)
     return sm.ratio() * 100.0
 
 
 def calculate_statistics(similarities: List[float]) -> Dict[str, float]:
-    """類似度のリストから統計量を計算する"""
+    """Calculate statistics from list of similarities"""
     return {
         "mean": statistics.mean(similarities),
         "median": statistics.median(similarities),
@@ -134,7 +133,7 @@ def calculate_statistics(similarities: List[float]) -> Dict[str, float]:
 
 
 def process_json_file(input_path: Path, output_path: Path) -> None:
-    """JSONファイルを読み込み、各ペアの類似度を計算して保存する"""
+    """Load JSON file, calculate similarity for each pair, and save results"""
     try:
         with open(input_path, "r") as f:
             data = json.load(f)
@@ -145,15 +144,15 @@ def process_json_file(input_path: Path, output_path: Path) -> None:
     similarities = []
     for item in tqdm(data, desc="Comparing binary pairs"):
         try:
-            # アセンブリコードを正規化して命令列を抽出
+            # Normalize assembly code and extract instruction sequences
             decompiled_insns = extract_instructions(normalize_disasm(item["decompiled_asm"]))
             original_insns = extract_instructions(normalize_disasm(item["original_asm"]))
 
-            # 類似度を計算
+            # Calculate similarity
             sim = compute_similarity(decompiled_insns, original_insns)
             similarities.append(sim)
 
-            # 結果をJSONに追記
+            # Add results to JSON
             item["binary_similarity_distance"] = sim
             item["decompiled_insn_count"] = len(decompiled_insns)
             item["original_insn_count"] = len(original_insns)
@@ -163,17 +162,17 @@ def process_json_file(input_path: Path, output_path: Path) -> None:
             item["decompiled_insn_count"] = None
             item["original_insn_count"] = None
 
-    # 統計情報を計算
+    # Calculate statistics
     stats = calculate_statistics(similarities)
 
-    # 結果を保存
+    # Save results
     with open(output_path, "w") as f:
         json.dump({
             "pairs": data,
             "statistics": stats
         }, f, indent=2)
 
-    # 統計情報を表示
+    # Display statistics
     print("\nBinary Similarity Statistics (Distance-based):")
     print(f"Mean: {stats['mean']:.2f}%")
     print(f"Median: {stats['median']:.2f}%")
@@ -187,40 +186,41 @@ def process_json_file(input_path: Path, output_path: Path) -> None:
 
 
 def process_single_pair(fileA: str, fileB: str):
-    """単一のペアの類似度を計算して表示する（従来の機能）"""
-    # 1) objdump 出力の読み込み
-    rawA = load_objdump(fileA)  # ターゲットバイナリの逆アセンブル結果
-    rawB = load_objdump(fileB)  # 候補バイナリの逆アセンブル結果
+    """Calculate and display similarity for a single pair (legacy functionality)"""
+    # 1) Load objdump output
+    rawA = load_objdump(fileA)  # Target binary disassembly result
+    rawB = load_objdump(fileB)  # Candidate binary disassembly result
 
-    # 2) 正規化処理
-    normA = normalize_disasm(rawA)  # ターゲットの正規化済み逆アセンブル
-    normB = normalize_disasm(rawB)  # 候補の正規化済み逆アセンブル
+    # 2) Normalization process
+    normA = normalize_disasm(rawA)  # Target's normalized disassembly
+    normB = normalize_disasm(rawB)  # Candidate's normalized disassembly
 
-    # 3) 命令列の抽出
-    insnsA = extract_instructions(normA)  # 例: ["push %rbp", "mov %rsp, %rbp", ...]
+    # 3) Extract instruction sequences
+    insnsA = extract_instructions(normA)  # Example: ["push %rbp", "mov %rsp, %rbp", ...]
     insnsB = extract_instructions(normB)
 
-    # もしターゲットに命令が存在しない場合はエラー
+    # Error if no instructions exist in target
     if len(insnsA) == 0:
         print("Error: Target instructions not found after normalization.", file=sys.stderr)
         sys.exit(1)
 
-    # 4) 編集距離に基づく一致率計算
+    # 4) Calculate match rate based on edit distance
     similarity = compute_similarity(insnsA, insnsB)
-    # 5) 結果を表示
-    print(f"命令レベル一致率: {similarity:.2f}% "
-          f"(ターゲット命令数: {len(insnsA)}, 候補命令数: {len(insnsB)})")
+    # 5) Display results
+    print(f"Instruction-level match rate: {similarity:.2f}% "
+          f"(Target instruction count: {len(insnsA)}, Candidate instruction count: {len(insnsB)})")
 
 
 def main():
     if len(sys.argv) == 3:
-        # JSONファイルを処理するモード
-        input_path = Path(sys.argv[1])
-        output_path = Path(sys.argv[2])
-        process_json_file(input_path, output_path)
-    elif len(sys.argv) == 3 and not sys.argv[1].endswith('.json'):
-        # 単一ペアを処理するモード（従来の機能）
-        process_single_pair(sys.argv[1], sys.argv[2])
+        if sys.argv[1].endswith('.json'):
+            # JSON file processing mode
+            input_path = Path(sys.argv[1])
+            output_path = Path(sys.argv[2])
+            process_json_file(input_path, output_path)
+        else:
+            # Single pair processing mode (legacy functionality)
+            process_single_pair(sys.argv[1], sys.argv[2])
     else:
         print(f"Usage: {sys.argv[0]} <input_json> <output_json>", file=sys.stderr)
         print(f"   or: {sys.argv[0]} <target_objdump.txt> <candidate_objdump.txt>", file=sys.stderr)

@@ -10,24 +10,24 @@ from tqdm import tqdm
 
 def extract_insns(objdump_text: str, normalize_imm: bool = True) -> List[str]:
     """
-    objdump -d の出力から、命令部分だけを取り出し、
-    オプションでアドレスや数値オペランドを正規化して返す。
+    Extract only instruction parts from objdump -d output,
+    optionally normalizing addresses and numeric operands.
 
     Args:
-        objdump_text: objdump -d の出力テキスト
-        normalize_imm: Trueの場合、数値を<IMM>に正規化。Falseの場合、生のアセンブリをそのまま使用
+        objdump_text: Output text from objdump -d
+        normalize_imm: If True, normalize numbers to <IMM>. If False, use raw assembly as-is
     """
     insns = []
-    # 各行:  00400530: 55                    push   %rbp
+    # Each line:  00400530: 55                    push   %rbp
     for line in objdump_text.splitlines():
         m = re.match(r"^\s*[0-9a-fA-F]+:\s+([0-9a-fA-F ]+)\s+([a-z]+\b.*)$", line)
         if not m:
             continue
         asm = m.group(2)
         if normalize_imm:
-            # アドレスや即値を一般化: 数字／16進数リテラルを '<IMM>' に置換
+            # Generalize addresses and immediate values: replace numeric/hex literals with '<IMM>'
             asm = re.sub(r"0x[0-9a-fA-F]+|\b\d+\b", "<IMM>", asm)
-        # 複数スペースは一つに
+        # Collapse multiple spaces to one
         asm = re.sub(r"\s+", " ", asm).strip()
         insns.append(asm)
     return insns
@@ -35,15 +35,15 @@ def extract_insns(objdump_text: str, normalize_imm: bool = True) -> List[str]:
 
 def similarity(a: List[str], b: List[str]) -> float:
     """
-    SequenceMatcher を使って、2 つの命令列の一致率を計算。
-    ratio() が 0～1 の浮動小数なので、百分率にして返す。
+    Calculate match rate between two instruction sequences using SequenceMatcher.
+    Since ratio() returns a floating point number between 0 and 1, convert to percentage.
     """
     sm = SequenceMatcher(None, a, b)
     return sm.ratio() * 100.0
 
 
 def calculate_statistics(similarities: List[float]) -> Dict[str, float]:
-    """類似度のリストから統計量を計算する"""
+    """Calculate statistics from list of similarities"""
     return {
         "mean": statistics.mean(similarities),
         "median": statistics.median(similarities),
@@ -56,7 +56,7 @@ def calculate_statistics(similarities: List[float]) -> Dict[str, float]:
 
 
 def process_json_file(input_path: Path, output_path: Path) -> None:
-    """JSONファイルを読み込み、各ペアの類似度を計算して保存する"""
+    """Load JSON file, calculate similarity for each pair, and save results"""
     try:
         with open(input_path, "r") as f:
             data = json.load(f)
@@ -68,19 +68,19 @@ def process_json_file(input_path: Path, output_path: Path) -> None:
     similarities_raw = []
     for item in tqdm(data, desc="Comparing binary pairs"):
         try:
-            # 正規化した命令列と生の命令列を抽出
+            # Extract normalized and raw instruction sequences
             decompiled_insns_norm = extract_insns(item["decompiled_asm"], normalize_imm=True)
             original_insns_norm = extract_insns(item["original_asm"], normalize_imm=True)
             decompiled_insns_raw = extract_insns(item["decompiled_asm"], normalize_imm=False)
             original_insns_raw = extract_insns(item["original_asm"], normalize_imm=False)
 
-            # 両方のモードで類似度を計算
+            # Calculate similarity for both modes
             sim_norm = similarity(decompiled_insns_norm, original_insns_norm)
             sim_raw = similarity(decompiled_insns_raw, original_insns_raw)
             similarities_normalized.append(sim_norm)
             similarities_raw.append(sim_raw)
 
-            # 結果をJSONに追記
+            # Add results to JSON
             item["binary_similarity_normalized"] = sim_norm
             item["binary_similarity_raw"] = sim_raw
             item["decompiled_insn_count"] = len(decompiled_insns_norm)
@@ -92,11 +92,11 @@ def process_json_file(input_path: Path, output_path: Path) -> None:
             item["decompiled_insn_count"] = None
             item["original_insn_count"] = None
 
-    # 両方のモードで統計情報を計算
+    # Calculate statistics for both modes
     stats_normalized = calculate_statistics(similarities_normalized)
     stats_raw = calculate_statistics(similarities_raw)
 
-    # 結果を保存
+    # Save results
     with open(output_path, "w") as f:
         json.dump({
             "pairs": data,
@@ -106,7 +106,7 @@ def process_json_file(input_path: Path, output_path: Path) -> None:
             }
         }, f, indent=2)
 
-    # 統計情報を表示
+    # Display statistics
     print("\nBinary Similarity Statistics (Normalized):")
     print(f"Mean: {stats_normalized['mean']:.2f}%")
     print(f"Median: {stats_normalized['median']:.2f}%")

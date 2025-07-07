@@ -21,7 +21,7 @@ class CodePair:
 
 def compile_and_objdump(source_code: str, output_dir: Path, prefix: str) -> Optional[Tuple[str, str]]:
     """Compile source code and get objdump output"""
-    # 一時ファイルの作成
+    # Create temporary file
     with tempfile.NamedTemporaryFile(delete=False, suffix=".c", mode="w", encoding="utf-8") as temp_file:
         temp_file.write(source_code)
         temp_file_path = temp_file.name

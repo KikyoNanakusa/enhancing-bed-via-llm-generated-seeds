@@ -9,14 +9,14 @@ from pathlib import Path
 from typing import Optional, List
 
 
-# プロジェクトのルートディレクトリをPythonパスに追加するのだ
+# Add project root directory to Python path
 project_root = str(Path(__file__).parent.parent)
 sys.path.append(project_root)
 
 from src.fix_compilation.core.fix_compilation import FixCompilation
 import src.fix_compilation.fixers
 
-# ロギングの設定をするのだ
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
@@ -28,50 +28,50 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def create_temp_source(code: str, deps: str) -> str:
-    """一時的なソースファイルを作成するのだ"""
+    """Create a temporary source file"""
     with tempfile.NamedTemporaryFile(suffix='.c', delete=False, mode='w') as f:
-        # 依存関係を先に書くのだ
+        # Write dependencies first
         f.write(deps)
         f.write('\n')
-        # メインのコードを書くのだ
+        # Write main code
         f.write(code)
         return f.name
 
 def analyze_compiler_errors(compiler_output: str) -> List[str]:
-    """コンパイラのエラー出力を解析して、エラーメッセージのリストを返すのだ"""
+    """Analyze compiler error output and return a list of error messages"""
     errors = []
     for line in compiler_output.split('\n'):
         if 'error:' in line:
-            # エラーメッセージの部分だけを抽出するのだ
+            # Extract only the error message part
             error_msg = line.split('error:')[-1].strip()
             if error_msg and error_msg not in errors:
                 errors.append(error_msg)
     return errors
 
 def fix_code_pair(code_pair: dict) -> dict:
-    """1つのコードペアを修正するのだ"""
+    """Fix a single code pair"""
     temp_file = create_temp_source(code_pair['decompiled_code'], code_pair['dep'])
     logger.info(f"Processing code pair with temp file: {temp_file}")
     
     try:
-        # コンパイルエラーを修正するのだ
+        # Fix compilation errors
         fixer = FixCompilation(
             source_path=temp_file,
             max_attempts=10,
-            compiler_options=['-std=c11', '-O2'],  # O2最適化を指定するのだ
+            compiler_options=['-std=c11', '-O2'],  # Specify O2 optimization
             use_clang_tidy=True
         )
         
-        # コンパイルを試みるのだ
+        # Attempt compilation
         success = fixer.run()
         
-        # コンパイラの出力を取得するのだ
+        # Get compiler output
         compiler_output = fixer.last_compiler_output if hasattr(fixer, 'last_compiler_output') else ""
         errors = analyze_compiler_errors(compiler_output)
         
         if success:
             logger.info("Successfully fixed the code!")
-            # 修正されたコードを読み込むのだ
+            # Read the fixed code
             with open(temp_file, 'r') as f:
                 fixed_code = f.read()
             return {
@@ -105,14 +105,14 @@ def fix_code_pair(code_pair: dict) -> dict:
             'compiler_output': ""
         }
     finally:
-        # 一時ファイルを削除するのだ
+        # Delete temporary file
         os.unlink(temp_file)
         logger.debug(f"Removed temporary file: {temp_file}")
 
 def main():
     logger.info("Starting to process failed compilation pairs...")
     
-    # 入力ファイルを読み込むのだ
+    # Read input file
     input_file = 'dataset/o2_failed_compilation_pairs.json'
     logger.info(f"Reading input file: {input_file}")
     with open(input_file, 'r') as f:
@@ -120,27 +120,27 @@ def main():
     
     logger.info(f"Found {len(code_pairs)} code pairs to process")
     
-    # 各コードペアを修正するのだ
+    # Fix each code pair
     fixed_pairs = []
     for i, pair in enumerate(code_pairs, 1):
         logger.info(f"Processing pair {i}/{len(code_pairs)}...")
         fixed_pair = fix_code_pair(pair)
         fixed_pairs.append(fixed_pair)
     
-    # 結果を保存するのだ
+    # Save results
     output_file = 'dataset/o2_fixed_decompiled_pairs.json'
     logger.info(f"Saving results to: {output_file}")
     with open(output_file, 'w') as f:
         json.dump(fixed_pairs, f, indent=2)
     
-    # 統計を表示するのだ
+    # Display statistics
     success_count = sum(1 for pair in fixed_pairs if pair['success'])
     logger.info("\n=== Results ===")
     logger.info(f"Total pairs: {len(fixed_pairs)}")
     logger.info(f"Successfully fixed: {success_count}")
     logger.info(f"Failed to fix: {len(fixed_pairs) - success_count}")
     
-    # 失敗したケースのエラー統計を表示するのだ
+    # Display error statistics for failed cases
     if len(fixed_pairs) - success_count > 0:
         logger.info("\n=== Error Statistics ===")
         error_counts = {}

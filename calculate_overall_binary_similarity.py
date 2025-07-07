@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-LLMで修正されたものとそうでないものを合算した距離ベース類似度の統計を計算するスクリプト
+Script to calculate distance-based similarity statistics combining LLM-fixed and non-fixed data
 
-使用方法:
+Usage:
     python calculate_overall_binary_similarity.py <opt>
     
-例:
+Examples:
     python calculate_overall_binary_similarity.py o0
     python calculate_overall_binary_similarity.py o2
 """
@@ -18,11 +18,11 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 from tqdm import tqdm
 
-# プロジェクトのルートディレクトリをPythonパスに追加するのだ
+# Add project root directory to Python path
 project_root = str(Path(__file__).parent.parent)
 sys.path.append(project_root)
 
-# compare_binary_distance.pyから関数をインポートするのだ
+# Import functions from compare_binary_distance.py
 from eval.compare_binary_distance import (
     normalize_disasm,
     extract_instructions,
@@ -31,7 +31,7 @@ from eval.compare_binary_distance import (
 )
 
 def load_compiled_pairs(opt: str) -> List[Dict]:
-    """コンパイル成功したペアを読み込むのだ"""
+    """Load successfully compiled pairs"""
     file_path = f'dataset/{opt}_compiled_pairs.json'
     try:
         with open(file_path, 'r') as f:
@@ -43,7 +43,7 @@ def load_compiled_pairs(opt: str) -> List[Dict]:
         return []
 
 def load_llm_fixed_pairs(opt: str) -> List[Dict]:
-    """LLMで修正されたペアを読み込むのだ"""
+    """Load LLM-fixed pairs"""
     file_path = f'dataset/{opt}_llm_fixed_pairs.json'
     try:
         with open(file_path, 'r') as f:
@@ -55,7 +55,7 @@ def load_llm_fixed_pairs(opt: str) -> List[Dict]:
         return []
 
 def load_llm_fixed_binary_compare(opt: str) -> List[Dict]:
-    """LLMで修正されたバイナリ比較結果を読み込むのだ"""
+    """Load LLM-fixed binary comparison results"""
     file_path = f'dataset/{opt}_llm_fixed_binary_compare.json'
     try:
         with open(file_path, 'r') as f:
@@ -67,13 +67,13 @@ def load_llm_fixed_binary_compare(opt: str) -> List[Dict]:
         return []
 
 def calculate_binary_similarity_for_pair(pair: Dict) -> Tuple[float, int, int]:
-    """1つのペアのバイナリ類似度を計算するのだ"""
+    """Calculate binary similarity for a single pair"""
     try:
-        # アセンブリコードを正規化して命令列を抽出するのだ
+        # Normalize assembly code and extract instruction sequences
         original_insns = extract_instructions(normalize_disasm(pair['original_asm']))
         fixed_insns = extract_instructions(normalize_disasm(pair['decompiled_asm']))
         
-        # 類似度を計算するのだ
+        # Calculate similarity
         similarity = compute_similarity(original_insns, fixed_insns)
         
         return similarity, len(original_insns), len(fixed_insns)
@@ -82,12 +82,12 @@ def calculate_binary_similarity_for_pair(pair: Dict) -> Tuple[float, int, int]:
         return 0.0, 0, 0
 
 def process_compiled_pairs(compiled_pairs: List[Dict]) -> List[Dict]:
-    """コンパイル成功したペアを処理してバイナリ類似度を計算するのだ"""
+    """Process successfully compiled pairs and calculate binary similarity"""
     results = []
     
     for pair in tqdm(compiled_pairs, desc="Processing compiled pairs"):
         try:
-            # バイナリ類似度を計算するのだ
+            # Calculate binary similarity
             similarity, original_count, fixed_count = calculate_binary_similarity_for_pair(pair)
             
             result = {
@@ -108,24 +108,24 @@ def process_compiled_pairs(compiled_pairs: List[Dict]) -> List[Dict]:
     return results
 
 def process_llm_fixed_pairs(llm_fixed_pairs: List[Dict], llm_binary_compare: List[Dict]) -> List[Dict]:
-    """LLMで修正されたペアを処理してバイナリ類似度を計算するのだ"""
+    """Process LLM-fixed pairs and calculate binary similarity"""
     results = []
     
-    # LLMバイナリ比較結果を辞書に変換するのだ（original_codeをキーとして）
+    # Convert LLM binary comparison results to dictionary (using original_code as key)
     binary_compare_dict = {}
     for pair in llm_binary_compare:
         binary_compare_dict[pair['original_code']] = pair
     
     for pair in tqdm(llm_fixed_pairs, desc="Processing LLM fixed pairs"):
         try:
-            # LLMバイナリ比較結果から類似度を取得するのだ
+            # Get similarity from LLM binary comparison results
             if pair['original_code'] in binary_compare_dict:
                 binary_pair = binary_compare_dict[pair['original_code']]
                 similarity = binary_pair['binary_similarity']
                 original_count = binary_pair['original_insn_count']
                 fixed_count = binary_pair['fixed_insn_count']
             else:
-                # バイナリ比較結果がない場合は計算するのだ
+                # Calculate if no binary comparison result exists
                 similarity, original_count, fixed_count = calculate_binary_similarity_for_pair(pair)
             
             result = {
@@ -147,8 +147,8 @@ def process_llm_fixed_pairs(llm_fixed_pairs: List[Dict], llm_binary_compare: Lis
     return results
 
 def calculate_overall_statistics(all_pairs: List[Dict]) -> Dict:
-    """全体の統計を計算するのだ"""
-    # 類似度のリストを抽出するのだ
+    """Calculate overall statistics"""
+    # Extract similarity list
     similarities = [pair['binary_similarity'] for pair in all_pairs if pair['binary_similarity'] is not None]
     
     if not similarities:
@@ -165,7 +165,7 @@ def calculate_overall_statistics(all_pairs: List[Dict]) -> Dict:
     return calculate_statistics(similarities)
 
 def calculate_type_statistics(pairs: List[Dict], pair_type: str) -> Dict:
-    """特定タイプのペアの統計を計算するのだ"""
+    """Calculate statistics for specific type of pairs"""
     type_pairs = [pair for pair in pairs if pair['type'] == pair_type]
     similarities = [pair['binary_similarity'] for pair in type_pairs if pair['binary_similarity'] is not None]
     
@@ -193,28 +193,28 @@ def main():
     opt = args.opt
     print(f"Processing optimization level: {opt}")
     
-    # データを読み込むのだ
+    # Load data
     compiled_pairs = load_compiled_pairs(opt)
     llm_fixed_pairs = load_llm_fixed_pairs(opt)
     llm_binary_compare = load_llm_fixed_binary_compare(opt)
     
-    # 各タイプのペアを処理するのだ
+    # Process each type of pairs
     compiled_results = process_compiled_pairs(compiled_pairs)
     llm_fixed_results = process_llm_fixed_pairs(llm_fixed_pairs, llm_binary_compare)
     
-    # 全体のペアを結合するのだ
+    # Combine all pairs
     all_pairs = compiled_results + llm_fixed_results
     
     print(f"\nTotal pairs processed: {len(all_pairs)}")
     print(f"Compiled pairs: {len(compiled_results)}")
     print(f"LLM fixed pairs: {len(llm_fixed_results)}")
     
-    # 統計を計算するのだ
+    # Calculate statistics
     overall_stats = calculate_overall_statistics(all_pairs)
     compiled_stats = calculate_type_statistics(all_pairs, 'compiled')
     llm_fixed_stats = calculate_type_statistics(all_pairs, 'llm_fixed')
     
-    # 結果を表示するのだ
+    # Display results
     print("\n" + "="*60)
     print("OVERALL BINARY SIMILARITY STATISTICS")
     print("="*60)
@@ -247,7 +247,7 @@ def main():
     print(f"Min: {llm_fixed_stats['min']:.2f}%")
     print(f"Max: {llm_fixed_stats['max']:.2f}%")
     
-    # 類似度分布を表示するのだ
+    # Display similarity distribution
     similarities = [pair['binary_similarity'] for pair in all_pairs if pair['binary_similarity'] is not None]
     print("\n" + "-"*40)
     print("SIMILARITY DISTRIBUTION")
@@ -258,7 +258,7 @@ def main():
         percentage = count / len(similarities) * 100 if similarities else 0
         print(f"{start:.1f}%-{end:.1f}%: {count} pairs ({percentage:.1f}%)")
     
-    # 結果をファイルに保存するのだ
+    # Save results to file
     output_file = f'dataset/{opt}_overall_binary_similarity_stats.json'
     result_data = {
         'optimization_level': opt,
